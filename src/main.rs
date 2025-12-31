@@ -7,12 +7,10 @@
 //!
 //! [1]: https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Basic_animations#An_animated_solar_system
 use iced::mouse;
-use iced::widget::canvas::stroke::{self, Stroke};
+use iced::widget::canvas;
 use iced::widget::canvas::{Geometry, Path};
-use iced::widget::{canvas, image};
 use iced::window;
-use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Size, Subscription, Theme, Vector};
-
+use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Size, Subscription, Theme};
 use std::time::Instant;
 
 pub fn main() -> iced::Result {
@@ -35,6 +33,7 @@ struct SolarSystem {
 #[derive(Debug, Clone, Copy)]
 enum Message {
     Tick,
+    Resize(iced::Size),
 }
 
 impl SolarSystem {
@@ -49,6 +48,9 @@ impl SolarSystem {
             Message::Tick => {
                 self.state.update(now);
             }
+            Message::Resize(size) => {
+                self.state.regenerate_starts(size);
+            }
         }
     }
 
@@ -61,15 +63,15 @@ impl SolarSystem {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        window::frames().map(|_| Message::Tick)
+        iced::Subscription::batch(vec![
+            window::frames().map(|_| Message::Tick),
+            window::resize_events().map(|(_, size)| Message::Resize(size)),
+        ])
     }
 }
 
 #[derive(Debug)]
 struct State {
-    sun: image::Handle,
-    earth: image::Handle,
-    moon: image::Handle,
     space_cache: canvas::Cache,
     system_cache: canvas::Cache,
     start: Instant,
@@ -78,20 +80,11 @@ struct State {
 }
 
 impl State {
-    const SUN_RADIUS: f32 = 70.0;
-    const ORBIT_RADIUS: f32 = 150.0;
-    const EARTH_RADIUS: f32 = 12.0;
-    const MOON_RADIUS: f32 = 4.0;
-    const MOON_DISTANCE: f32 = 28.0;
-
     pub fn new() -> State {
         let now = Instant::now();
         let size = window::Settings::default().size;
 
         State {
-            sun: image::Handle::from_bytes(include_bytes!("../assets/sun.png").as_slice()),
-            earth: image::Handle::from_bytes(include_bytes!("../assets/earth.png").as_slice()),
-            moon: image::Handle::from_bytes(include_bytes!("../assets/moon.png").as_slice()),
             space_cache: canvas::Cache::default(),
             system_cache: canvas::Cache::default(),
             start: now,
@@ -100,6 +93,9 @@ impl State {
         }
     }
 
+    pub fn regenerate_starts(&mut self, iced::Size { width, height }: iced::Size) {
+        self.stars = Self::generate_stars(width, height);
+    }
     pub fn update(&mut self, now: Instant) {
         self.start = self.start.min(now);
         self.now = now;
@@ -136,7 +132,7 @@ impl<Message> canvas::Program<Message> for State {
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        use std::f32::consts::PI;
+        //use std::f32::consts::PI;
 
         let background = self.space_cache.draw(renderer, bounds.size(), |frame| {
             frame.fill_rectangle(Point::ORIGIN, frame.size(), Color::BLACK);
@@ -151,44 +147,44 @@ impl<Message> canvas::Program<Message> for State {
             frame.fill(&stars, Color::WHITE);
         });
 
-        let system = self.system_cache.draw(renderer, bounds.size(), |frame| {
-            let center = frame.center();
-            frame.translate(Vector::new(center.x, center.y));
+        //let system = self.system_cache.draw(renderer, bounds.size(), |frame| {
+        //    let center = frame.center();
+        //    frame.translate(Vector::new(center.x, center.y));
 
-            frame.draw_image(Rectangle::with_radius(Self::SUN_RADIUS), &self.sun);
+        //    frame.draw_image(Rectangle::with_radius(Self::SUN_RADIUS), &self.sun);
 
-            let orbit = Path::circle(Point::ORIGIN, Self::ORBIT_RADIUS);
-            frame.stroke(
-                &orbit,
-                Stroke {
-                    style: stroke::Style::Solid(Color::WHITE.scale_alpha(0.1)),
-                    width: 1.0,
-                    line_dash: canvas::LineDash {
-                        offset: 0,
-                        segments: &[3.0, 6.0],
-                    },
-                    ..Stroke::default()
-                },
-            );
+        //    let orbit = Path::circle(Point::ORIGIN, Self::ORBIT_RADIUS);
+        //    frame.stroke(
+        //        &orbit,
+        //        Stroke {
+        //            style: stroke::Style::Solid(Color::WHITE.scale_alpha(0.1)),
+        //            width: 1.0,
+        //            line_dash: canvas::LineDash {
+        //                offset: 0,
+        //                segments: &[3.0, 6.0],
+        //            },
+        //            ..Stroke::default()
+        //        },
+        //    );
 
-            let elapsed = self.now - self.start;
-            let rotation = (2.0 * PI / 60.0) * elapsed.as_secs() as f32
-                + (2.0 * PI / 60_000.0) * elapsed.subsec_millis() as f32;
+        //    let elapsed = self.now - self.start;
+        //    let rotation = (2.0 * PI / 60.0) * elapsed.as_secs() as f32
+        //        + (2.0 * PI / 60_000.0) * elapsed.subsec_millis() as f32;
 
-            frame.rotate(rotation);
-            frame.translate(Vector::new(Self::ORBIT_RADIUS, 0.0));
+        //    frame.rotate(rotation);
+        //    frame.translate(Vector::new(Self::ORBIT_RADIUS, 0.0));
 
-            frame.draw_image(
-                Rectangle::with_radius(Self::EARTH_RADIUS),
-                canvas::Image::new(&self.earth).rotation(-rotation * 20.0),
-            );
+        //    frame.draw_image(
+        //        Rectangle::with_radius(Self::EARTH_RADIUS),
+        //        canvas::Image::new(&self.earth).rotation(-rotation * 20.0),
+        //    );
 
-            frame.rotate(rotation * 10.0);
-            frame.translate(Vector::new(0.0, Self::MOON_DISTANCE));
+        //    frame.rotate(rotation * 10.0);
+        //    frame.translate(Vector::new(0.0, Self::MOON_DISTANCE));
 
-            frame.draw_image(Rectangle::with_radius(Self::MOON_RADIUS), &self.moon);
-        });
+        //    frame.draw_image(Rectangle::with_radius(Self::MOON_RADIUS), &self.moon);
+        //});
 
-        vec![background, system]
+        vec![background]
     }
 }
