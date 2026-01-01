@@ -8,9 +8,9 @@
 //! [1]: https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Basic_animations#An_animated_solar_system
 use iced::mouse;
 use iced::widget::canvas;
-use iced::widget::canvas::{Geometry, Path};
+use iced::widget::canvas::{Geometry, Path, Stroke, stroke};
 use iced::window;
-use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Size, Subscription, Theme};
+use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Subscription, Theme};
 use std::time::Instant;
 
 pub fn main() -> iced::Result {
@@ -76,7 +76,7 @@ struct State {
     system_cache: canvas::Cache,
     start: Instant,
     now: Instant,
-    stars: Vec<(Point, f32)>,
+    stars: Vec<Point>,
 }
 
 impl State {
@@ -102,19 +102,18 @@ impl State {
         self.system_cache.clear();
     }
 
-    fn generate_stars(width: f32, height: f32) -> Vec<(Point, f32)> {
+    fn generate_stars(width: f32, height: f32) -> Vec<Point> {
         use rand::Rng;
+
+        let gap = width / 100.;
 
         let mut rng = rand::rng();
 
-        (0..100)
-            .map(|_| {
-                (
-                    Point::new(
-                        rng.random_range((-width / 2.0)..(width / 2.0)),
-                        rng.random_range((-height / 2.0)..(height / 2.0)),
-                    ),
-                    rng.random_range(0.5..1.0),
+        (0..=500)
+            .map(|index| {
+                Point::new(
+                    index as f32 * gap,
+                    rng.random_range((-height / 2.0)..(height / 2.0)),
                 )
             })
             .collect()
@@ -138,52 +137,30 @@ impl<Message> canvas::Program<Message> for State {
             frame.fill_rectangle(Point::ORIGIN, frame.size(), Color::BLACK);
 
             let stars = Path::new(|path| {
-                for (p, size) in &self.stars {
-                    path.rectangle(*p, Size::new(*size, *size));
+                for p in &self.stars {
+                    path.line_to(*p);
                 }
             });
 
-            frame.translate(frame.center() - Point::ORIGIN);
-            frame.fill(&stars, Color::WHITE);
+            let translation = Point {
+                x: Point::ORIGIN.x,
+                y: frame.center().y,
+            };
+            frame.translate(translation - Point::ORIGIN);
+            frame.stroke(
+                &stars,
+                Stroke {
+                    width: 3.,
+                    style: stroke::Style::Solid(iced::Color::WHITE),
+                    line_dash: canvas::LineDash {
+                        offset: 0,
+                        segments: &[3.0, 6.0],
+                    },
+                    ..Default::default()
+                },
+            );
+            // frame.fill(&stars, Color::WHITE);
         });
-
-        //let system = self.system_cache.draw(renderer, bounds.size(), |frame| {
-        //    let center = frame.center();
-        //    frame.translate(Vector::new(center.x, center.y));
-
-        //    frame.draw_image(Rectangle::with_radius(Self::SUN_RADIUS), &self.sun);
-
-        //    let orbit = Path::circle(Point::ORIGIN, Self::ORBIT_RADIUS);
-        //    frame.stroke(
-        //        &orbit,
-        //        Stroke {
-        //            style: stroke::Style::Solid(Color::WHITE.scale_alpha(0.1)),
-        //            width: 1.0,
-        //            line_dash: canvas::LineDash {
-        //                offset: 0,
-        //                segments: &[3.0, 6.0],
-        //            },
-        //            ..Stroke::default()
-        //        },
-        //    );
-
-        //    let elapsed = self.now - self.start;
-        //    let rotation = (2.0 * PI / 60.0) * elapsed.as_secs() as f32
-        //        + (2.0 * PI / 60_000.0) * elapsed.subsec_millis() as f32;
-
-        //    frame.rotate(rotation);
-        //    frame.translate(Vector::new(Self::ORBIT_RADIUS, 0.0));
-
-        //    frame.draw_image(
-        //        Rectangle::with_radius(Self::EARTH_RADIUS),
-        //        canvas::Image::new(&self.earth).rotation(-rotation * 20.0),
-        //    );
-
-        //    frame.rotate(rotation * 10.0);
-        //    frame.translate(Vector::new(0.0, Self::MOON_DISTANCE));
-
-        //    frame.draw_image(Rectangle::with_radius(Self::MOON_RADIUS), &self.moon);
-        //});
 
         vec![background]
     }
