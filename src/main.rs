@@ -6,6 +6,8 @@
 //! Inspired by the example found in the MDN docs[1].
 //!
 //! [1]: https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API/Tutorial/Basic_animations#An_animated_solar_system
+mod backend;
+
 use iced::mouse;
 use iced::widget::canvas;
 use iced::widget::canvas::{Geometry, Path, Stroke, stroke};
@@ -13,9 +15,9 @@ use iced::window;
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Subscription, Theme};
 use std::time::Instant;
 
-pub fn main() -> iced::Result {
-    tracing_subscriber::fmt::init();
+use crate::backend::PwEvent;
 
+pub fn main() -> iced::Result {
     iced::application::timed(
         SolarSystem::new,
         SolarSystem::update,
@@ -30,10 +32,11 @@ struct SolarSystem {
     state: State,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 enum Message {
     Tick,
     Resize(iced::Size),
+    Pw(PwEvent),
 }
 
 impl SolarSystem {
@@ -51,6 +54,7 @@ impl SolarSystem {
             Message::Resize(size) => {
                 self.state.regenerate_starts(size);
             }
+            Message::Pw(event) => {}
         }
     }
 
@@ -66,6 +70,7 @@ impl SolarSystem {
         iced::Subscription::batch(vec![
             window::frames().map(|_| Message::Tick),
             window::resize_events().map(|(_, size)| Message::Resize(size)),
+            backend::listen_pw().map(Message::Pw),
         ])
     }
 }

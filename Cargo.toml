@@ -6,7 +6,9 @@ edition = "2024"
 publish = false
 
 [dependencies]
-iced = { version = "0.14.0", features =  ["debug", "canvas", "image", "tokio"]}
+cpal = { version = "0.17.0", features = ["jack"] }
+iced = { version = "0.14.0", features = ["debug", "canvas", "image", "tokio"] }
+pipewire = "0.9.2"
 
 rand = "0.9.2"
 tracing-subscriber = "0.3"
