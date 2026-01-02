@@ -1,14 +1,15 @@
 use iced::futures::SinkExt;
+use iced::futures::channel::mpsc::Sender;
 use pipewire as pw;
 use pw::{properties::properties, spa};
 use spa::param::format::{MediaSubtype, MediaType};
 use spa::param::format_utils;
 use spa::pod::Pod;
+use std::collections::VecDeque;
 use std::convert::TryInto;
 use std::mem;
 use std::slice::Chunks;
-
-use iced::futures::channel::mpsc::Sender;
+use std::sync::mpsc::{Sender as StdSender, channel};
 
 #[derive(Debug, Clone)]
 pub enum PwEvent {
@@ -19,21 +20,71 @@ pub enum PwEvent {
 
 struct UserData {
     format: spa::param::audio::AudioInfoRaw,
-    sender: Sender<PwEvent>,
+    sender: StdSender<PwEvent>,
 }
 
 pub fn listen_pw() -> iced::Subscription<PwEvent> {
     iced::Subscription::run(|| {
         iced::stream::channel(100, |mut output: Sender<PwEvent>| async move {
-            if let Err(_) = connect_inner(&output) {
-                output.send(PwEvent::PwErr).await.ok();
+            let (sync_sender, sync_receiver) = channel();
+            std::thread::spawn(move || {
+                connect_inner(sync_sender).unwrap();
+            });
+            loop {
+                let Ok(data) = sync_receiver.recv() else {
+                    let _ = output.send(PwEvent::PwErr).await;
+                    break;
+                };
+                let _ = output.send(data).await;
             }
         })
     })
 }
 
 #[derive(Debug, Clone)]
-pub struct Matrix<T>
+pub struct MatrixFixed<T = f32>
+where
+    T: Clone + Copy + Default,
+{
+    inner: Vec<VecDeque<T>>,
+    len: usize,
+    channel: usize,
+}
+
+impl<T> MatrixFixed<T>
+where
+    T: Clone + Copy + Default,
+{
+    pub fn new(len: usize, channel: usize) -> Self {
+        Self {
+            inner: vec![vec![Default::default(); len].into(); channel],
+            len,
+            channel,
+        }
+    }
+    pub fn channel(&self) -> usize {
+        self.channel
+    }
+    pub fn len(&self) -> usize {
+        self.len
+    }
+    pub fn data(&self) -> &[VecDeque<T>] {
+        self.inner.as_slice()
+    }
+    pub fn append(&mut self, matrix: Matrix<T>) {
+        assert_eq!(matrix.channel(), self.channel());
+        let chunks = matrix.chunks(1);
+        for chunk in chunks {
+            for (data, channel_data) in chunk.iter().zip(&mut self.inner) {
+                channel_data.push_back(data[0]);
+                channel_data.pop_front();
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Matrix<T = f32>
 where
     T: Clone + Copy,
 {
@@ -66,8 +117,11 @@ impl<T> Matrix<T>
 where
     T: Clone + Copy,
 {
-    fn new(inner: Vec<Vec<T>>) -> Self {
+    fn init(inner: Vec<Vec<T>>) -> Self {
         Self { inner }
+    }
+    fn channel(&self) -> usize {
+        self.inner.len()
     }
     fn chunks<'a>(&'a self, chunk_size: usize) -> MatrixChunks<'a, T> {
         let mut chunks = vec![];
@@ -78,7 +132,7 @@ where
     }
 }
 
-fn connect_inner(sender: &Sender<PwEvent>) -> Result<(), pw::Error> {
+fn connect_inner(sender: StdSender<PwEvent>) -> Result<(), pw::Error> {
     pw::init();
 
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
@@ -87,7 +141,7 @@ fn connect_inner(sender: &Sender<PwEvent>) -> Result<(), pw::Error> {
 
     let data = UserData {
         format: Default::default(),
-        sender: sender.clone(),
+        sender,
     };
 
     /* Create a simple stream, the simple stream manages the core and remote
@@ -142,7 +196,7 @@ fn connect_inner(sender: &Sender<PwEvent>) -> Result<(), pw::Error> {
 
             let _ = user_data
                 .sender
-                .try_send(PwEvent::FormatChange(user_data.format));
+                .send(PwEvent::FormatChange(user_data.format));
             println!(
                 "capturing rate:{} channels:{}",
                 user_data.format.rate(),
@@ -164,7 +218,8 @@ fn connect_inner(sender: &Sender<PwEvent>) -> Result<(), pw::Error> {
                 let Some(samples) = data.data() else {
                     return;
                 };
-                let mut matrix_inner = vec![vec![0.; n_samples as usize]; n_channels as usize];
+                let mut matrix_inner =
+                    vec![vec![0.; (n_samples / n_channels) as usize]; n_channels as usize];
                 for c in 0..n_channels {
                     for (index, n) in (c..n_samples).step_by(n_channels as usize).enumerate() {
                         let start = n as usize * mem::size_of::<f32>();
@@ -182,8 +237,8 @@ fn connect_inner(sender: &Sender<PwEvent>) -> Result<(), pw::Error> {
                         .iter()
                         .map(|data| data.iter().copied().collect())
                         .collect();
-                    let data_chunk: Matrix<f32> = Matrix::new(data_new);
-                    let _ = user_data.sender.try_send(PwEvent::DataNew(data_chunk));
+                    let data_chunk: Matrix<f32> = Matrix::init(data_new);
+                    let _ = user_data.sender.send(PwEvent::DataNew(data_chunk));
                 }
             }
         })
