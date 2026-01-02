@@ -13,19 +13,14 @@ use iced::widget::canvas;
 use iced::widget::canvas::{Geometry, Path, Stroke, stroke};
 use iced::window;
 use iced::{Color, Element, Fill, Point, Rectangle, Renderer, Subscription, Theme};
-use std::time::Instant;
 
 use crate::backend::{Matrix, MatrixFixed, PwEvent};
 
 pub fn main() -> iced::Result {
-    iced::application::timed(
-        SolarSystem::new,
-        SolarSystem::update,
-        SolarSystem::subscription,
-        SolarSystem::view,
-    )
-    .theme(SolarSystem::theme)
-    .run()
+    iced::application(SolarSystem::new, SolarSystem::update, SolarSystem::view)
+        .subscription(SolarSystem::subscription)
+        .theme(SolarSystem::theme)
+        .run()
 }
 
 struct SolarSystem {
@@ -35,7 +30,6 @@ struct SolarSystem {
 #[derive(Debug, Clone)]
 enum Message {
     Tick,
-    Resize(iced::Size),
     Pw(PwEvent),
 }
 
@@ -46,20 +40,18 @@ impl SolarSystem {
         }
     }
 
-    fn update(&mut self, message: Message, _now: Instant) {
+    fn update(&mut self, message: Message) {
         match message {
             Message::Tick => {
-                self.state.update();
+                self.state.update_canvas();
             }
-            Message::Resize(size) => {
-                self.state.regenerate_starts(size);
-            }
+
             Message::Pw(PwEvent::FormatChange(format)) => {
                 let channel = format.channels();
-                self.state.lines_mut().reset_matrix(1000, channel as usize);
+                self.state.reset_matrix(500, channel as usize);
             }
             Message::Pw(PwEvent::DataNew(data)) => {
-                self.state.lines_mut().append_data(data);
+                self.state.append_data(data);
             }
             _ => {}
         }
@@ -76,7 +68,6 @@ impl SolarSystem {
     fn subscription(&self) -> Subscription<Message> {
         iced::Subscription::batch(vec![
             window::frames().map(|_| Message::Tick),
-            window::resize_events().map(|(_, size)| Message::Resize(size)),
             backend::listen_pw().map(Message::Pw),
         ])
     }
@@ -90,8 +81,6 @@ struct LineData {
 
 #[derive(Debug)]
 struct LineDatas {
-    inner: Vec<LineData>,
-    size: iced::Size,
     matrix: MatrixFixed,
 }
 
@@ -103,98 +92,94 @@ const COLOR_ALL: &'static [iced::Color] = &[
 ];
 
 impl LineDatas {
-    fn new(size: iced::Size) -> Self {
+    fn new() -> Self {
         Self {
-            inner: Vec::new(),
-            size,
-            matrix: MatrixFixed::new(1000, 2),
+            matrix: MatrixFixed::new(500, 2),
         }
     }
 
     fn append_data(&mut self, matrix: Matrix) {
         self.matrix.append(matrix);
-        self.generate_datas();
-    }
-
-    fn update_size(&mut self, size: iced::Size) {
-        self.size = size;
-        self.generate_datas();
     }
 
     fn reset_matrix(&mut self, len: usize, channel: usize) {
         self.matrix = MatrixFixed::new(len, channel);
-        self.generate_datas();
     }
 
-    fn generate_datas(&mut self) {
+    fn generate_datas(&self, size: iced::Size) -> Vec<LineData> {
         let len = self.matrix.len();
-        let width = self.size.width;
+        let width = size.width;
         let step = width / len as f32;
         let datas = self.matrix.data();
-        self.inner.clear();
+        let mut output: Vec<LineData> = vec![];
         for (index, data) in datas.iter().enumerate() {
             let color = COLOR_ALL[index % COLOR_ALL.len()];
             let data: Vec<Point> = data
                 .iter()
                 .enumerate()
-                .map(|(index, wav)| Point::new(index as f32 * step, *wav * 200.))
+                .map(|(index, wav)| Point::new(index as f32 * step, *wav * 400.))
                 .collect();
-            self.inner.push(LineData { data, color });
+            output.push(LineData { data, color });
         }
-    }
-
-    fn data(&self) -> &[LineData] {
-        &self.inner
+        output
     }
 }
 
 #[derive(Debug)]
 struct State {
-    space_cache: canvas::Cache,
+    line_cache: canvas::Cache,
     datas: LineDatas,
 }
 
 impl State {
     pub fn new() -> State {
-        let size = window::Settings::default().size;
-
         State {
-            space_cache: canvas::Cache::default(),
-            datas: LineDatas::new(size),
+            line_cache: canvas::Cache::default(),
+            datas: LineDatas::new(),
         }
     }
 
-    pub fn regenerate_starts(&mut self, size: iced::Size) {
-        self.datas.update_size(size);
+    pub fn generate_datas(&self, size: iced::Size) -> Vec<LineData> {
+        self.datas.generate_datas(size)
     }
 
-    pub fn lines_mut(&mut self) -> &mut LineDatas {
-        &mut self.datas
+    pub fn update_canvas(&mut self) {
+        self.line_cache.clear();
     }
-    pub fn lines(&self) -> &LineDatas {
-        &self.datas
+
+    pub fn append_data(&mut self, matrix: Matrix) {
+        self.datas.append_data(matrix);
     }
-    pub fn update(&mut self) {
-        self.space_cache.clear();
+    pub fn reset_matrix(&mut self, len: usize, channel: usize) {
+        self.datas.reset_matrix(len, channel);
     }
 }
 
 impl<Message> canvas::Program<Message> for State {
-    type State = ();
+    type State = Vec<LineData>;
 
+    fn update(
+        &self,
+        state: &mut Self::State,
+        _event: &iced::Event,
+        bounds: Rectangle,
+        _cursor: mouse::Cursor,
+    ) -> Option<canvas::Action<Message>> {
+        *state = self.generate_datas(bounds.size());
+        None
+    }
     fn draw(
         &self,
-        _state: &Self::State,
+        datas: &Self::State,
         renderer: &Renderer,
         _theme: &Theme,
         bounds: Rectangle,
         _cursor: mouse::Cursor,
     ) -> Vec<Geometry> {
-        let background = self.space_cache.draw(renderer, bounds.size(), |frame| {
+        let background = self.line_cache.draw(renderer, bounds.size(), |frame| {
             frame.fill_rectangle(Point::ORIGIN, frame.size(), Color::BLACK);
             let center = frame.center();
-            let datas = self.lines().data();
-            for data in datas.as_ref() {
+            for data in datas {
                 let stars = Path::new(|path| {
                     for p in &data.data {
                         path.line_to(*p);

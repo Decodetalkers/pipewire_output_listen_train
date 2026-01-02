@@ -28,7 +28,7 @@ pub fn listen_pw() -> iced::Subscription<PwEvent> {
         iced::stream::channel(100, |mut output: Sender<PwEvent>| async move {
             let (sync_sender, sync_receiver) = channel();
             std::thread::spawn(move || {
-                connect_inner(sync_sender).unwrap();
+                connect(sync_sender);
             });
             loop {
                 let Ok(data) = sync_receiver.recv() else {
@@ -129,6 +129,12 @@ where
             chunks.push(data.chunks(chunk_size));
         }
         MatrixChunks { inner: chunks }
+    }
+}
+
+fn connect(sender: StdSender<PwEvent>) {
+    if let Err(_) = connect_inner(sender.clone()) {
+        let _ = sender.send(PwEvent::PwErr);
     }
 }
 
