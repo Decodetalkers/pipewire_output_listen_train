@@ -179,7 +179,7 @@ impl LineDatas {
             let data: Vec<Point> = data
                 .iter()
                 .enumerate()
-                .map(|(index, wav)| Point::new(index as f32 * step, *wav * 400.))
+                .map(|(index, wav)| Point::new(index as f32 * step, *wav * -400.))
                 .collect();
             output.push(LineData { data, color });
         }
@@ -295,7 +295,7 @@ impl<Message> canvas::Program<Message> for State {
                 } else {
                     Point {
                         x: Point::ORIGIN.x,
-                        y: frame.height(),
+                        y: frame.height() - 2.,
                     }
                 };
 
