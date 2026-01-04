@@ -2,25 +2,85 @@ use iced::futures::SinkExt;
 use iced::futures::channel::mpsc::Sender;
 use pipewire as pw;
 use pw::{properties::properties, spa};
+use realfft::RealFftPlanner;
 use spa::param::format::{MediaSubtype, MediaType};
 use spa::param::format_utils;
 use spa::pod::Pod;
 use std::collections::VecDeque;
 use std::convert::TryInto;
+use std::f32::consts::PI;
 use std::mem;
 use std::slice::Chunks;
 use std::sync::mpsc::{Sender as StdSender, channel};
 
+pub const FFT_SIZE: usize = 8192;
+
+#[derive(Debug, Clone)]
+pub struct AudioInfo {
+    rate: u32,
+    channels: u32,
+}
+
+impl AudioInfo {
+    pub fn rate(&self) -> u32 {
+        self.rate
+    }
+    pub fn channels(&self) -> u32 {
+        self.channels
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum PwEvent {
-    FormatChange(spa::param::audio::AudioInfoRaw),
+    FormatChange(AudioInfo),
     DataNew(Matrix<f32>),
+    Spectrum(Vec<f32>),
     PwErr,
 }
 
 struct UserData {
     format: spa::param::audio::AudioInfoRaw,
     sender: StdSender<PwEvent>,
+    spectrum_data: VecDeque<f32>,
+}
+
+pub fn apply_blackman_harris(block: &mut [f32]) {
+    let n = block.len().saturating_sub(1) as f32;
+    if n <= 0.0 {
+        return;
+    }
+
+    for (i, sample) in block.iter_mut().enumerate() {
+        let k = i as f32 / n;
+        let window = 0.01168f32.mul_add(
+            -(6.0 * PI * k).cos(),
+            0.14128f32.mul_add(
+                (4.0 * PI * k).cos(),
+                0.48829f32.mul_add(-(2.0 * PI * k).cos(), 0.35875),
+            ),
+        );
+        *sample *= window;
+    }
+}
+
+impl UserData {
+    fn append_spectrum(&mut self, datas: &[f32]) {
+        for data in datas {
+            self.spectrum_data.push_back(*data);
+            self.spectrum_data.pop_front();
+        }
+    }
+    fn send_spectrum(&self) {
+        let mut block: Vec<f32> = self.spectrum_data.iter().copied().collect();
+        let mut planner: RealFftPlanner<f32> = RealFftPlanner::new();
+        let fft = planner.plan_fft_forward(FFT_SIZE);
+        apply_blackman_harris(&mut block);
+        let mut spectrum = fft.make_output_vec();
+        if fft.process(&mut block, &mut spectrum).is_ok() {
+            let data: Vec<f32> = spectrum.iter().map(|v| v.norm()).collect();
+            let _ = self.sender.send(PwEvent::Spectrum(data));
+        }
+    }
 }
 
 pub fn listen_pw() -> iced::Subscription<PwEvent> {
@@ -148,6 +208,7 @@ fn connect_inner(sender: StdSender<PwEvent>) -> Result<(), pw::Error> {
     let data = UserData {
         format: Default::default(),
         sender,
+        spectrum_data: VecDeque::with_capacity(FFT_SIZE),
     };
 
     /* Create a simple stream, the simple stream manages the core and remote
@@ -200,9 +261,10 @@ fn connect_inner(sender: StdSender<PwEvent>) -> Result<(), pw::Error> {
                 .parse(param)
                 .expect("Failed to parse param changed to AudioInfoRaw");
 
-            let _ = user_data
-                .sender
-                .send(PwEvent::FormatChange(user_data.format));
+            let _ = user_data.sender.send(PwEvent::FormatChange(AudioInfo {
+                rate: user_data.format.rate(),
+                channels: user_data.format.channels(),
+            }));
             println!(
                 "capturing rate:{} channels:{}",
                 user_data.format.rate(),
@@ -235,6 +297,7 @@ fn connect_inner(sender: StdSender<PwEvent>) -> Result<(), pw::Error> {
                         matrix_inner[c as usize][index] = f;
                     }
                 }
+                user_data.append_spectrum(&matrix_inner[0]);
                 let matrix = Matrix {
                     inner: matrix_inner,
                 };
