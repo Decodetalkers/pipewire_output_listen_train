@@ -14,6 +14,8 @@ use std::slice::Chunks;
 use std::sync::mpsc::{Sender as StdSender, channel};
 
 pub const FFT_SIZE: usize = 8192;
+pub const MIN_FREQ: f64 = 15.;
+pub const POINTS_PER_OCTAVE: usize = 72;
 
 #[derive(Debug, Clone)]
 pub struct AudioInfo {
@@ -208,7 +210,7 @@ fn connect_inner(sender: StdSender<PwEvent>) -> Result<(), pw::Error> {
     let data = UserData {
         format: Default::default(),
         sender,
-        spectrum_data: VecDeque::with_capacity(FFT_SIZE),
+        spectrum_data: VecDeque::from_iter(vec![0_f32; FFT_SIZE].iter().copied()),
     };
 
     /* Create a simple stream, the simple stream manages the core and remote
@@ -309,6 +311,7 @@ fn connect_inner(sender: StdSender<PwEvent>) -> Result<(), pw::Error> {
                     let data_chunk: Matrix<f32> = Matrix::init(data_new);
                     let _ = user_data.sender.send(PwEvent::DataNew(data_chunk));
                 }
+                user_data.send_spectrum();
             }
         })
         .register()?;
