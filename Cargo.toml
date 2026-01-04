@@ -1,7 +1,7 @@
 [package]
-name = "solar_system"
+name = "wav_viewer"
 version = "0.1.0"
-authors = ["Héctor Ramón Jiménez <hector0193@gmail.com>"]
+authors = ["Decodetalkers"]
 edition = "2024"
 publish = false
 
