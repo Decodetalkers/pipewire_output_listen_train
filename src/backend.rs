@@ -195,7 +195,7 @@ where
 }
 
 fn connect(sender: StdSender<PwEvent>) {
-    if let Err(_) = connect_inner(sender.clone()) {
+    if connect_inner(sender.clone()).is_err() {
         let _ = sender.send(PwEvent::PwErr);
     }
 }
@@ -306,7 +306,7 @@ fn connect_inner(sender: StdSender<PwEvent>) -> Result<(), pw::Error> {
                 for data in matrix.chunks(80) {
                     let data_new: Vec<Vec<f32>> = data
                         .iter()
-                        .map(|data| data.iter().copied().collect())
+                        .map(|data| data.to_vec())
                         .collect();
                     let data_chunk: Matrix<f32> = Matrix::init(data_new);
                     let _ = user_data.sender.send(PwEvent::DataNew(data_chunk));

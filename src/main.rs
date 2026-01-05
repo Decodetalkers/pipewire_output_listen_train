@@ -121,7 +121,7 @@ struct LineDatas {
     rate: u32,
 }
 
-const COLOR_ALL: &'static [iced::Color] = &[
+const COLOR_ALL: &[iced::Color] = &[
     iced::Color::WHITE,
     iced::Color::from_rgb(0.4, 0.4, 1.),
     iced::Color::from_rgb(0., 0.5, 1.),
@@ -238,7 +238,7 @@ struct CarvaState {
 }
 
 impl CarvaState {
-    pub fn get_data<'a>(&'a self, show_type: ShowType) -> Vec<&'a LineData> {
+    pub fn get_data(&self, show_type: ShowType) -> Vec<&LineData> {
         match show_type {
             ShowType::Raw => self.raw.iter().collect(),
             ShowType::Spectrum => vec![&self.spectrum],
